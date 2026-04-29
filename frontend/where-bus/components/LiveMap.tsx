@@ -87,7 +87,7 @@ export default function LiveMap({ selectedStop, selectedRoute }: LiveMapProps) {
   // Fetch the physical polyline path when a route is selected
   useEffect(() => {
     if (selectedRoute) {
-      fetch(`http://localhost:8080/api/transit/routes/${selectedRoute.id}/path`)
+      fetch(`/api/transit/routes/${selectedRoute.id}/path`)
         .then(res => res.json())
         .then((data: Stop[]) => {
           setRouteStops(data);

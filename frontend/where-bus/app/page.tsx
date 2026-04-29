@@ -53,7 +53,7 @@ export default function Home() {
     }
 
     try {
-      const res = await fetch(`http://localhost:8080/api/transit/search?q=${query}`);
+      const res = await fetch(`/api/transit/search?q=${query}`);
       const data = await res.json();
       setStopResults(data.stops || []);
       setRouteResults(data.routes || []);
