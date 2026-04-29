@@ -193,6 +193,40 @@ public class TransitService {
         }
     }
 
+    /**
+     * Searches for stops matching the query string.
+     * Limits to 10 results to keep the JSON payload small.
+     */
+    public List<Stop> searchStops(String query) {
+        List<Stop> results = new ArrayList<>();
+        String lowerQuery = query.toLowerCase();
+
+        for (Stop stop : stopDirectory.values()) {
+            if (stop.getName().toLowerCase().contains(lowerQuery)) {
+                results.add(stop);
+                if (results.size() >= 10) break;
+            }
+        }
+        return results;
+    }
+
+    /**
+     * Searches for routes matching the query string.
+     */
+    public List<Route> searchRoutes(String query) {
+        List<Route> results = new ArrayList<>();
+        String lowerQuery = query.toLowerCase();
+
+        for (Route route : routeDirectory.values()) {
+            if (route.getName().toLowerCase().contains(lowerQuery) ||
+                    (route.getLongName() != null && route.getLongName().toLowerCase().contains(lowerQuery))) {
+                results.add(route);
+                if (results.size() >= 10) break;
+            }
+        }
+        return results;
+    }
+
     public Stop getStopById(String id) {
         return stopDirectory.get(id);
     }

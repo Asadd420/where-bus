@@ -72,4 +72,24 @@ public class TransitController {
 
         return path;
     }
+
+    /**
+     * Unified search endpoint for stops and routes.
+     * Example: GET /api/transit/search?q=Masjid
+     */
+    @GetMapping("/search")
+    public Map<String, Object> searchTransit(@RequestParam String q) {
+        Map<String, Object> response = new HashMap<>();
+
+        if (q == null || q.trim().isEmpty()) {
+            response.put("stops", new ArrayList<>());
+            response.put("routes", new ArrayList<>());
+            return response;
+        }
+
+        response.put("stops", transitService.searchStops(q));
+        response.put("routes", transitService.searchRoutes(q));
+
+        return response;
+    }
 }
