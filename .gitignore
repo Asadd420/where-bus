@@ -1,0 +1,8 @@
+# vimfiles
+*.swp
+
+# misc
+.DS_Store
+
+# custom
+ignore/
