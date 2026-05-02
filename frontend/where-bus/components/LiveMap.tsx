@@ -35,8 +35,25 @@ function MapUpdater({ center, zoom, isOffset }: { center: [number, number]; zoom
       targetLatLng = map.unproject(targetPoint, zoom);
     }
 
-    map.flyTo(targetLatLng, zoom, { duration: 1.5 });
-    
+    // 1. Calculate how far the map needs to move
+    const currentCenter = map.getCenter();
+    const distance = currentCenter.distanceTo(targetLatLng);
+
+    // 2. Only animate if the distance is significant (> 50 meters)
+    if (distance > 50) {
+      map.flyTo(targetLatLng, zoom, { duration: 1.5 });
+    } else {
+      // If it's already there, just snap the view instantly to prevent the 0-distance shiver
+      map.setView(targetLatLng, zoom);
+    }
+
+    // 3. Force Leaflet to recalculate its container size to fix layout shifts
+    const timeout = setTimeout(() => {
+      map.invalidateSize();
+    }, 100);
+
+    return () => clearTimeout(timeout);
+
   }, [center[0], center[1], zoom, isOffset, map]);
 
   return null;
@@ -167,15 +184,11 @@ export default function LiveMap({ selectedStop, selectedRoute }: LiveMapProps) {
           </CircleMarker>
         )}
 
-        {/* Show the default FSKTM fallback if we don't have user location */}
-        {!hasUserLocation && (
-          <CircleMarker 
-            center={FSKTM_POSITION} 
-            radius={7}
-            pathOptions={{ color: 'white', fillColor: '#484849', fillOpacity: 1, weight: 3 }}
-          >
+        {/* Only show the default FSKTM fallback if we don't have user location and nothing is searched */}
+        {!selectedStop && !selectedRoute && !hasUserLocation && (
+          <Marker position={FSKTM_POSITION} icon={MinimalGrayIcon}>
             <Popup>FSKTM, Universiti Malaya (Default)</Popup>
-          </CircleMarker>
+          </Marker>
         )}
 
         {/* Pass the dynamic target position to the recenter button */}
