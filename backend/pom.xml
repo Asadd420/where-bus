@@ -24,6 +24,12 @@
             <artifactId>opencsv</artifactId>
             <version>5.10</version>
         </dependency>
+
+        <dependency>
+            <groupId>org.springdoc</groupId>
+            <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
+            <version>3.0.1</version>
+        </dependency>
     </dependencies>
 	<groupId>com.wherebus</groupId>
 	<artifactId>wherebus</artifactId>
