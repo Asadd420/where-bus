@@ -2,6 +2,7 @@ package com.wherebus;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.scheduling.annotation.EnableScheduling;
 
 /**
  * The main entry point for the WhereBus backend application.
@@ -9,6 +10,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
  * web server, and scans for components like Services and Controllers.
  */
 @SpringBootApplication
+@EnableScheduling
 public class WhereBusApplication {
 
     /**
