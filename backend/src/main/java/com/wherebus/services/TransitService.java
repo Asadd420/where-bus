@@ -99,6 +99,10 @@ public class TransitService {
                 String name = row[2].trim();
                 String longName = row[3].trim();
 
+                if (name.isEmpty()) {
+                    name = longName;
+                }
+
                 if (routeDirectory.containsKey(id)) {
                     System.out.println("⚠️  Route ID collision: " + id + " — overwriting with updated definition.");
                 }
