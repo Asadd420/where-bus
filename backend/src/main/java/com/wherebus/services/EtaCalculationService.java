@@ -7,8 +7,8 @@ import org.springframework.stereotype.Service;
 import java.util.*;
 
 /**
- * Service responsible for calculating real-time ETAs using geographic math
- * and sorting incoming arrivals via a Priority Queue (Min-Heap).
+ * Computes real-time ETAs for buses approaching a stop.
+ * Uses Haversine distance and a min-heap to return arrivals sorted by time remaining.
  */
 @Service
 public class EtaCalculationService {
@@ -16,7 +16,7 @@ public class EtaCalculationService {
     private final TransitService transitService;
     private final LiveTrackingService liveTrackingService;
 
-    // Average inner-city bus speed in Kuala Lumpur (roughly 20 km/h expressed in meters per second)
+    // Fallback speed (~20 km/h) used when the vehicle feed doesn't report a live speed value.
     private static final double DEFAULT_BUS_SPEED_MPS = 5.5;
 
     public EtaCalculationService(TransitService transitService, LiveTrackingService liveTrackingService) {
@@ -25,7 +25,11 @@ public class EtaCalculationService {
     }
 
     /**
-     * Calculates and orders all approaching buses for a specific stop on a specific route.
+     * Returns all active buses on the given route, sorted by ascending ETA to the target stop.
+     *
+     * @param routeId     Public route ID (e.g. "T789"). Trailing-zero matching is handled by LiveTrackingService.
+     * @param targetStopId Stop ID as defined in stops.txt (e.g. "1001410").
+     * @return Ordered list of arrival predictions, or an empty list if the stop is unknown.
      */
     public List<Map<String, Object>> getArrivalsForStop(String routeId, String targetStopId) {
         Stop targetStop = transitService.getStopById(targetStopId);
@@ -33,111 +37,92 @@ public class EtaCalculationService {
             return Collections.emptyList();
         }
 
-        // 1. Initialize a Priority Queue that sorts arrivals by the lowest ETA (seconds remaining)
-        PriorityQueue<ArrivalPrediction> arrivalHeap = new PriorityQueue<>(
+        PriorityQueue<ArrivalPrediction> heap = new PriorityQueue<>(
                 Comparator.comparingInt(ArrivalPrediction::getSecondsRemaining)
         );
 
-        // 2. Grab the live fleet from memory
-        Map<String, VehiclePosition> activeFleet = liveTrackingService.getActiveVehicles();
+        Map<String, VehiclePosition> routeVehicles = liveTrackingService.getActiveVehicles();
 
-
-        // 3. Filter and calculate ETAs
-        for (Map.Entry<String, VehiclePosition> entry : activeFleet.entrySet()) {
+        for (Map.Entry<String, VehiclePosition> entry : routeVehicles.entrySet()) {
             VehiclePosition vehicle = entry.getValue();
+            if (!vehicle.hasTrip()) continue;
 
-            if (vehicle.hasTrip()) {
-                String broadcastedRouteId = vehicle.getTrip().getRouteId();
+            String broadcastedRouteId = vehicle.getTrip().getRouteId();
+            boolean matchesRoute = routeId.equalsIgnoreCase(broadcastedRouteId)
+                    || (routeId + "0").equalsIgnoreCase(broadcastedRouteId);
 
-                // Match requested "T789" exactly OR match broadcasted "T7890"
-                boolean matchesRoute = routeId.equalsIgnoreCase(broadcastedRouteId) ||
-                        (routeId + "0").equalsIgnoreCase(broadcastedRouteId);
+            if (!matchesRoute) continue;
 
-                if (matchesRoute) {
-                    double busLat = vehicle.getPosition().getLatitude();
-                    double busLon = vehicle.getPosition().getLongitude();
+            double distanceMeters = haversineDistance(
+                    vehicle.getPosition().getLatitude(),
+                    vehicle.getPosition().getLongitude(),
+                    targetStop.getLatitude(),
+                    targetStop.getLongitude()
+            );
 
-                    double distanceMeters = calculateHaversineDistance(
-                            busLat, busLon, targetStop.getLatitude(), targetStop.getLongitude()
-                    );
+            double speedMps = vehicle.getPosition().hasSpeed() && vehicle.getPosition().getSpeed() > 1.0
+                    ? vehicle.getPosition().getSpeed()
+                    : DEFAULT_BUS_SPEED_MPS;
 
-                    double speedMps = vehicle.getPosition().hasSpeed() && vehicle.getPosition().getSpeed() > 1.0
-                            ? vehicle.getPosition().getSpeed()
-                            : DEFAULT_BUS_SPEED_MPS;
+            int secondsRemaining = (int) (distanceMeters / speedMps);
+            int directionId = vehicle.getTrip().hasDirectionId() ? vehicle.getTrip().getDirectionId() : 0;
+            String licensePlate = vehicle.getVehicle().hasLicensePlate()
+                    ? vehicle.getVehicle().getLicensePlate()
+                    : entry.getKey();
 
-                    int secondsRemaining = (int) (distanceMeters / speedMps);
-
-                    // Safely extract the direction flag from the moving bus
-                    int directionId = vehicle.getTrip().hasDirectionId() ? vehicle.getTrip().getDirectionId() : 0;
-
-                    String licensePlate = vehicle.getVehicle().hasLicensePlate()
-                            ? vehicle.getVehicle().getLicensePlate()
-                            : entry.getKey();
-
-                    // Push the direction flag into the Min-Heap alongside the telemetry
-                    arrivalHeap.offer(new ArrivalPrediction(
-                            entry.getKey(), licensePlate, distanceMeters, secondsRemaining, directionId
-                    ));
-                }
-            }
+            heap.offer(new ArrivalPrediction(entry.getKey(), licensePlate, distanceMeters, secondsRemaining, directionId));
         }
 
-        // 4. Drain the Priority Queue into an ordered list for the JSON response
-        List<Map<String, Object>> sortedArrivals = new ArrayList<>();
-        while (!arrivalHeap.isEmpty()) {
-            ArrivalPrediction prediction = arrivalHeap.poll();
+        List<Map<String, Object>> arrivals = new ArrayList<>();
+        while (!heap.isEmpty()) {
+            ArrivalPrediction p = heap.poll();
 
             Map<String, Object> payload = new HashMap<>();
-            payload.put("vehicleId", prediction.getVehicleId());
-            payload.put("licensePlate", prediction.getLicensePlate());
-            payload.put("distanceMeters", Math.round(prediction.getDistanceMeters()));
-            payload.put("etaSeconds", prediction.getSecondsRemaining());
-            payload.put("etaFormatted", formatEta(prediction.getSecondsRemaining()));
+            payload.put("vehicleId", p.getVehicleId());
+            payload.put("licensePlate", p.getLicensePlate());
+            payload.put("distanceMeters", Math.round(p.getDistanceMeters()));
+            payload.put("etaSeconds", p.getSecondsRemaining());
+            payload.put("etaFormatted", formatEta(p.getSecondsRemaining()));
+            payload.put("directionId", p.getDirectionId());
+            payload.put("directionLabel", p.getDirectionId() == 0 ? "outbound" : "inbound");
 
-            // Expose the direction outputs to the frontend JSON structure
-            payload.put("directionId", prediction.getDirectionId());
-            payload.put("directionLabel", prediction.getDirectionId() == 0 ? "outbound" : "inbound");
-
-            sortedArrivals.add(payload);
+            arrivals.add(payload);
         }
 
-        return sortedArrivals;
+        return arrivals;
     }
 
     /**
-     * The Haversine Formula.
-     * Calculates the great-circle distance between two GPS coordinates in meters.
+     * Calculates the great-circle distance between two GPS coordinates using the Haversine formula.
+     * Returns distance in meters.
      */
-    private double calculateHaversineDistance(double lat1, double lon1, double lat2, double lon2) {
-        final int R = 6371000; // Earth radius in meters
-        double latDistance = Math.toRadians(lat2 - lat1);
-        double lonDistance = Math.toRadians(lon2 - lon1);
+    private double haversineDistance(double lat1, double lon1, double lat2, double lon2) {
+        final int R = 6371000;
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
 
-        double a = Math.sin(latDistance / 2) * Math.sin(latDistance / 2)
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
                 + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-                * Math.sin(lonDistance / 2) * Math.sin(lonDistance / 2);
+                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
 
-        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-        return R * c;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
     private String formatEta(int totalSeconds) {
         if (totalSeconds < 60) return "Arriving";
-        int minutes = totalSeconds / 60;
-        return minutes + " min";
+        return (totalSeconds / 60) + " min";
     }
 
-    /**
-     * Internal helper class representing an item inside our Priority Queue.
-     */
+    /** Internal heap entry representing a single bus's predicted arrival at the target stop. */
     private static class ArrivalPrediction {
         private final String vehicleId;
         private final String licensePlate;
         private final double distanceMeters;
         private final int secondsRemaining;
-        private final int directionId; // Added direction tracking
+        private final int directionId;
 
-        public ArrivalPrediction(String vehicleId, String licensePlate, double distanceMeters, int secondsRemaining, int directionId) {
+        public ArrivalPrediction(String vehicleId, String licensePlate, double distanceMeters,
+                                  int secondsRemaining, int directionId) {
             this.vehicleId = vehicleId;
             this.licensePlate = licensePlate;
             this.distanceMeters = distanceMeters;
