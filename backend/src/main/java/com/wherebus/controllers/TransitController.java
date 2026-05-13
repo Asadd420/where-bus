@@ -20,12 +20,21 @@ import java.util.*;
 
 /**
  * REST endpoints for static transit data, live vehicle positions, and ETA predictions.
- * All business logic lives in the service layer; this controller only handles routing and delegation.
  *
- * <p><b>Route ID parameter:</b> All endpoints that accept a {@code routeId} expect the
- * {@code route_id} value from routes.txt — the first column (e.g. "30000016" for MRT Feeder
- * route T815, "T7890" for rapid-bus-kl route T789). This is distinct from the short display
- * name (e.g. "T815") shown on buses. Use the /search endpoint to look up route IDs by name.
+ * <p><b>Route identifier convention:</b> All endpoints that accept a {@code routeId}
+ * parameter expect the route <b>short name</b> — the public identifier printed on buses
+ * and broadcast by Prasarana in the live GTFS-RT feed.
+ * <ul>
+ *   <li>MRT Feeder routes: use the short name (e.g. {@code "T815"}, {@code "T459"}).</li>
+ *   <li>rapid-bus-kl routes: use the short name (e.g. {@code "T789"}, {@code "U300"}).</li>
+ * </ul>
+ * Do <b>not</b> pass the internal GTFS {@code route_id} from routes.txt (e.g.
+ * {@code "30000016"}). Use {@code GET /search?q=T815} to look up a route's short name
+ * and stop IDs before calling the live data endpoints.
+ *
+ * <p><b>Stop identifier convention:</b> All endpoints that accept a {@code stopId}
+ * expect the {@code stop_id} value from stops.txt (numeric string, e.g. {@code "12000802"}).
+ * Use {@code GET /search?q=Universiti} to find stop IDs by name.
  */
 @RestController
 @RequestMapping("/api/transit")
@@ -47,47 +56,38 @@ public class TransitController {
     }
 
     /**
-     * Sanity check: confirms TransitService is loaded and can resolve a known stop ID.
-     * GET /api/transit/test
+     * Returns static metadata for a route given its short name.
+     * GET /api/transit/routes/{shortName}
      */
-    @Operation(summary = "Service health check",
-            description = "Verifies TransitService is loaded by resolving a known stop ID.")
-    @ApiResponse(responseCode = "200", content = @Content(mediaType = "text/plain"))
-    @GetMapping("/test")
-    public String testDataLink() {
-        Stop stop = transitService.getStopById("12000802");
-        return stop != null
-                ? "TransitService is wired up! Found stop: " + stop.getName()
-                : "TransitService is wired up, but stop 12000802 is missing.";
-    }
-
-    /**
-     * Returns static metadata for a route (short name, long name, headsigns).
-     * GET /api/transit/routes/{routeId}
-     */
-    @Operation(summary = "Get route metadata",
-            description = "Pass the route_id from routes.txt (first column), not the display name.")
+    @Operation(
+            summary = "Get route metadata",
+            description = "Returns the route's short name, long name, and direction headsigns. "
+                    + "Pass the route short name (e.g. 'T815'), not the internal GTFS route_id.")
     @ApiResponse(responseCode = "200", content = @Content(mediaType = "application/json",
             schema = @Schema(implementation = Route.class)))
-    @GetMapping("/routes/{routeId}")
+    @GetMapping("/routes/{shortName}")
     public Route getRouteDetails(
-            @Parameter(description = "route_id from routes.txt.", example = "30000016")
-            @PathVariable String routeId) {
+            @Parameter(description = "Route short name as displayed on buses.", example = "T815")
+            @PathVariable String shortName) {
+        String routeId = transitService.resolveRouteIdByShortName(shortName);
         return transitService.getRouteById(routeId);
     }
 
     /**
-     * Returns the ordered stop sequence along a route, suitable for drawing a polyline on a map.
-     * Returns the outbound (direction 0) path.
-     * GET /api/transit/routes/{routeId}/path
+     * Returns the ordered outbound stop sequence for a route, suitable for drawing a map polyline.
+     * GET /api/transit/routes/{shortName}/path
      */
-    @Operation(summary = "Get route stop sequence (outbound)")
+    @Operation(
+            summary = "Get outbound route stop sequence",
+            description = "Returns stops in outbound (direction 0) order. "
+                    + "Pass the route short name (e.g. 'T815').")
     @ApiResponse(responseCode = "200", content = @Content(mediaType = "application/json",
             array = @ArraySchema(schema = @Schema(implementation = Stop.class))))
-    @GetMapping("/routes/{routeId}/path")
+    @GetMapping("/routes/{shortName}/path")
     public List<Stop> getRoutePath(
-            @Parameter(description = "route_id from routes.txt.", example = "30000016")
-            @PathVariable String routeId) {
+            @Parameter(description = "Route short name as displayed on buses.", example = "T815")
+            @PathVariable String shortName) {
+        String routeId = transitService.resolveRouteIdByShortName(shortName);
         LinkedList<String> stopIds = transitService.getRoutePath(routeId);
         if (stopIds == null) return Collections.emptyList();
 
@@ -101,15 +101,21 @@ public class TransitController {
 
     /**
      * Searches stops and routes by name. Returns up to 10 results per category.
-     * Use the returned route {@code id} field as the routeId parameter for other endpoints.
-     * GET /api/transit/search?q=T815
+     * GET /api/transit/search?q=Universiti
+     *
+     * <p>Use the {@code name} field from route results as the {@code routeId} for
+     * {@code /vehicles} and {@code /eta}. Use the {@code id} field from stop results
+     * as the {@code stopId}.
      */
-    @Operation(summary = "Search stops and routes by name",
-            description = "Returns matching stops and routes. Use the route 'id' field in results as the routeId for /vehicles and /eta.")
+    @Operation(
+            summary = "Search stops and routes by name",
+            description = "Returns up to 10 matching stops and routes. "
+                    + "From route results, use the 'name' field (short name, e.g. 'T815') as the routeId for /vehicles and /eta. "
+                    + "From stop results, use the 'id' field (e.g. '12000802') as the stopId.")
     @ApiResponse(responseCode = "200", content = @Content(mediaType = "application/json"))
     @GetMapping("/search")
     public Map<String, Object> searchTransit(
-            @Parameter(description = "Partial stop name or route name/number.", example = "T815")
+            @Parameter(description = "Partial stop name or route number.", example = "Universiti")
             @RequestParam String q) {
         if (q == null || q.trim().isEmpty()) {
             return Map.of("stops", List.of(), "routes", List.of());
@@ -122,17 +128,21 @@ public class TransitController {
 
     /**
      * Returns active buses approaching a stop, sorted by ascending ETA.
-     * Accepts either the internal route_id from routes.txt or the public broadcast ID.
-     * GET /api/transit/eta?routeId=30000016&stopId=12000802
+     * GET /api/transit/eta?routeId=T815&stopId=12000802
      */
-    @Operation(summary = "Get real-time ETAs for a stop",
-            description = "Returns approaching buses sorted by ETA. "
-                    + "Pass the route_id from routes.txt (e.g. '30000016') or the broadcast ID (e.g. 'T815') — both are resolved. "
-                    + "Use /search to find stop IDs by name.")
+    @Operation(
+            summary = "Get real-time ETAs for a stop",
+            description = "Returns buses approaching the given stop on the given route, sorted by ETA. "
+                    + "**routeId**: pass the route short name (e.g. 'T815' or 'T789') — "
+                    + "do NOT pass the internal GTFS route_id (e.g. '30000016'). "
+                    + "**stopId**: pass the stop_id from stops.txt (e.g. '12000802'). "
+                    + "Use /search to find both values by name. "
+                    + "Each result includes a directionId (0 = outbound, 1 = inbound) "
+                    + "so the frontend can filter by the user's direction of travel.")
     @ApiResponse(responseCode = "200", content = @Content(mediaType = "application/json"))
     @GetMapping("/eta")
     public List<Map<String, Object>> getRealtimeEta(
-            @Parameter(description = "route_id from routes.txt or broadcast route ID.", example = "30000016")
+            @Parameter(description = "Route short name (e.g. 'T815'). Not the internal route_id.", example = "T815")
             @RequestParam String routeId,
             @Parameter(description = "stop_id from stops.txt.", example = "12000802")
             @RequestParam String stopId) {
@@ -141,34 +151,41 @@ public class TransitController {
 
     /**
      * Returns all live vehicles currently on the given route with GPS coordinates and direction.
-     * Accepts either the internal route_id or the broadcast ID.
-     * GET /api/transit/vehicles?routeId=30000016
+     * GET /api/transit/vehicles?routeId=T815
      *
-     * <p>Response fields:
+     * <p>Response fields per vehicle:
      * <ul>
-     *   <li>{@code directionId}: 0 = outbound, 1 = inbound (from GTFS-RT trip descriptor).</li>
-     *   <li>{@code bearing}: degrees clockwise from north, null if not broadcast.</li>
+     *   <li>{@code directionId}: 0 = outbound, 1 = inbound.</li>
+     *   <li>{@code bearing}: degrees clockwise from True North; null if not broadcast.</li>
      * </ul>
      */
-    @Operation(summary = "Get live vehicle positions for a route",
-            description = "Accepts route_id from routes.txt or broadcast route ID. "
-                    + "Use /debug-fleet to see exact broadcast IDs if results are unexpectedly empty.")
+    @Operation(
+            summary = "Get live vehicle positions for a route",
+            description = "Returns GPS coordinates and direction for all active buses on the route. "
+                    + "**routeId**: pass the route short name (e.g. 'T815' or 'T789') — "
+                    + "do NOT pass the internal GTFS route_id. "
+                    + "If results are unexpectedly empty, use /debug-fleet to verify the "
+                    + "exact route ID format being broadcast by Prasarana.")
     @ApiResponse(responseCode = "200", content = @Content(mediaType = "application/json"))
     @GetMapping("/vehicles")
     public List<Map<String, Object>> getLiveVehiclesForRoute(
-            @Parameter(description = "route_id from routes.txt or broadcast route ID.", example = "30000016")
+            @Parameter(description = "Route short name (e.g. 'T815'). Not the internal route_id.", example = "T815")
             @RequestParam String routeId) {
         return liveTrackingService.getVehiclesByRoute(routeId);
     }
 
     /**
-     * Debug endpoint: shows raw Prasarana broadcast structure for the live fleet.
-     * Check {@code uniqueRoutesActiveNow} to verify the exact route ID format being broadcast.
+     * Debug endpoint: shows the raw Prasarana broadcast structure for the live fleet.
      * GET /api/transit/debug-fleet
+     *
+     * <p>Check {@code uniqueRoutesActiveNow} to see the exact route ID format Prasarana is
+     * broadcasting. If a route short name is not in that list, either no buses are currently
+     * active or the feed is using a different format than expected.
      */
-    @Operation(summary = "Debug live fleet feed",
+    @Operation(
+            summary = "Debug live fleet feed",
             description = "Shows total active buses, all unique broadcasted route IDs, and 5 sample vehicles. "
-                    + "Use this to verify route ID formats when /vehicles returns unexpected results.")
+                    + "Use this when /vehicles returns unexpected results to verify broadcast route ID formats.")
     @ApiResponse(responseCode = "200", content = @Content(mediaType = "application/json"))
     @GetMapping("/debug-fleet")
     public Map<String, Object> debugActiveFleet() {

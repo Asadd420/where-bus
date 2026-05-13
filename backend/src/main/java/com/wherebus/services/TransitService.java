@@ -16,29 +16,40 @@ import com.opencsv.CSVReader;
 /**
  * Loads static GTFS data at startup and holds the full transit network in memory.
  *
+ * <p><b>Route ID conventions:</b>
+ * <ul>
+ *   <li>{@code routeDirectory} is keyed by the internal GTFS {@code route_id} from routes.txt
+ *       (e.g. {@code "30000016"} for MRT Feeder, {@code "T7890"} for rapid-bus-kl). This is
+ *       the first column in routes.txt and is used internally for all static data lookups.</li>
+ *   <li>{@code shortNameToRouteId} maps the public short name (e.g. {@code "T815"},
+ *       {@code "T789"}) to the internal route_id. The short name matches what Prasarana
+ *       broadcasts in the live GTFS-RT feed, so all API endpoints that accept a route
+ *       identifier expect the <b>short name</b> (e.g. "T815"), not the internal ID.</li>
+ *   <li>Use {@link #resolveRouteIdByShortName(String)} to translate a short name to the
+ *       internal ID before any static data lookup.</li>
+ * </ul>
+ *
  * <p><b>Data structures:</b>
  * <ul>
  *   <li>{@code stopDirectory} / {@code routeDirectory} — HashMap for O(1) ID lookups.
  *       Never mutated after startup, so no synchronisation is needed.</li>
  *   <li>{@code routePaths} — One LinkedList per "routeId_directionId" key, preserving
  *       the ordered stop sequence for each direction independently.</li>
- *   <li>{@code stopCumulativeDistances} — Parallel to routePaths. For each stop in the
- *       sequence, stores its cumulative road distance (km) from the route start, derived
- *       from the shape polyline. Used by EtaCalculationService for accurate road distance
- *       and hasPassed() checks without a routing engine.</li>
- *   <li>{@code shapePolylines} — Raw shape point lists (lat/lon pairs) keyed by shape_id.
- *       Used at startup to project stops onto the route geometry. Not accessed at request time.</li>
+ *   <li>{@code stopCumulativeDistances} — Parallel to routePaths. Cumulative road distance
+ *       (km) from route start to each stop, derived from shape polylines. Used by
+ *       EtaCalculationService for accurate road distance and hasPassed() checks.</li>
+ *   <li>{@code shapePolylines} — Populated during startup only; cleared afterwards to
+ *       free memory. Not accessed at request time.</li>
  *   <li>{@code stopGraph} — Adjacency list for future pathfinding use.</li>
  * </ul>
  *
- * <p><b>Multi-feed column differences:</b> rapid-bus-kl and rapid-bus-mrtfeeder use different
- * column layouts and schema variants across all five GTFS files. All parsing uses header-row
- * column index maps rather than hardcoded positions to handle both feeds with one code path
- * and remain robust against future schema changes.
+ * <p><b>Multi-feed schema differences:</b> rapid-bus-kl and rapid-bus-mrtfeeder use
+ * different column layouts. All parsing uses header-row column index maps rather than
+ * hardcoded positions.
  *
- * <p><b>shape_dist_traveled:</b> rapid-bus-mrtfeeder provides this in both shapes.txt and
- * stop_times.txt (cumulative km). rapid-bus-kl does not. When absent, cumulative arc-length
- * is computed from shape point coordinates during startup.
+ * <p><b>shape_dist_traveled:</b> rapid-bus-mrtfeeder provides this in shapes.txt and
+ * stop_times.txt (cumulative km). rapid-bus-kl does not — arc-length is computed from
+ * shape point coordinates instead.
  */
 @Service
 public class TransitService {
@@ -46,21 +57,21 @@ public class TransitService {
     private final Map<String, Stop> stopDirectory = new HashMap<>();
     private final Map<String, Route> routeDirectory = new HashMap<>();
 
-    // key: "routeId_directionId"
+    // Maps route short name → internal route_id.
+    // e.g. "T815" → "30000016", "T789" → "T7890"
+    // The short name is what Prasarana broadcasts in the live feed and what API callers pass.
+    private final Map<String, String> shortNameToRouteId = new HashMap<>();
+
+    // key: "routeId_directionId" (internal route_id, e.g. "30000016_0")
     private final Map<String, LinkedList<String>> routePaths = new HashMap<>();
 
     // Parallel to routePaths: cumulative road distance in km from route start to each stop.
-    // key: "routeId_directionId", value: list of distances indexed same as routePaths.
     private final Map<String, List<Double>> stopCumulativeDistances = new HashMap<>();
 
-    // key: shape_id, value: ordered list of [lat, lon, cumulativeDistKm] points.
-    // The third element is the cumulative arc-length from the shape start.
-    // Only populated during startup; not accessed at request time.
+    // Populated during startup; cleared after stop distances are computed.
     private final Map<String, List<double[]>> shapePolylines = new HashMap<>();
 
-    // key: "routeId_directionId", value: shape_id
     private final Map<String, String> routeDirectionToShapeId = new HashMap<>();
-
     private final Map<String, List<String>> stopGraph = new HashMap<>();
 
     private static final String[] FEED_DIRECTORIES = {
@@ -85,11 +96,11 @@ public class TransitService {
             }
         }
 
-        // Shape polylines are no longer needed after distances are computed.
         shapePolylines.clear();
 
         System.out.println("✅ Stops loaded:            " + stopDirectory.size());
         System.out.println("✅ Routes loaded:           " + routeDirectory.size());
+        System.out.println("✅ Short name mappings:     " + shortNameToRouteId.size());
         System.out.println("✅ Route paths loaded:      " + routePaths.size());
         System.out.println("✅ Stop distances computed: " + stopCumulativeDistances.size());
         System.out.println("✅ Graph vertices:          " + stopGraph.size());
@@ -100,9 +111,8 @@ public class TransitService {
     // -------------------------------------------------------------------------
 
     /**
-     * Reads the header row of a CSV file and returns a map of column name → zero-based index.
-     * Used by all load methods instead of hardcoded column positions, so both feed schemas
-     * are handled with one code path.
+     * Reads the header row and returns a column name → zero-based index map.
+     * Used by all loaders so both feed schemas are handled with one code path.
      */
     private Map<String, Integer> parseColumnIndices(String[] headerRow) {
         Map<String, Integer> cols = new HashMap<>();
@@ -126,8 +136,6 @@ public class TransitService {
      *
      * <p>rapid-bus-kl:        stop_id, stop_name, stop_desc, stop_lat, stop_lon
      * <p>rapid-bus-mrtfeeder: stop_id, stop_code, stop_name, stop_lat, stop_lon
-     *
-     * Header parsing resolves the correct name/lat/lon columns for each feed.
      */
     private void loadStops(String folderPath) throws Exception {
         String category = folderPath.substring(folderPath.lastIndexOf('/') + 1);
@@ -151,12 +159,14 @@ public class TransitService {
     }
 
     /**
-     * Parses routes.txt and populates routeDirectory.
+     * Parses routes.txt, populates routeDirectory, and builds the shortNameToRouteId map.
      *
      * <p>rapid-bus-kl:        route_id, agency_id, route_short_name, route_long_name, ...
-     * <p>rapid-bus-mrtfeeder: route_id, agency_id, (blank), route_short_name, route_long_name(=type), ...
+     * <p>rapid-bus-mrtfeeder: route_id, agency_id, (blank), route_short_name, route_long_name, ...
      *
-     * MRT Feeder routes have no meaningful long name — short name is used for both fields.
+     * <p>MRT Feeder short names are blank in the raw file — the long name column is used instead.
+     * After normalisation, short name is the public identifier (e.g. "T815") and route_id is
+     * the internal GTFS key (e.g. "30000016"). Both are stored; shortNameToRouteId maps between them.
      */
     private void loadRoutes(String folderPath) throws Exception {
         ClassPathResource resource = new ClassPathResource(folderPath + "/routes.txt");
@@ -169,13 +179,24 @@ public class TransitService {
                 String name = col(row, cols, "route_short_name");
                 String longName = col(row, cols, "route_long_name");
 
-                // MRT Feeder short names are blank — fall back to long name.
                 if (name.isEmpty()) name = longName;
 
                 if (routeDirectory.containsKey(id)) {
                     System.out.println("⚠️  Route ID collision: " + id + " — overwriting with updated definition.");
                 }
+
                 routeDirectory.put(id, new Route(id, name, longName));
+
+                // Register the short name → internal ID mapping.
+                // If two routes share a short name (shouldn't happen, but log it).
+                if (!name.isEmpty()) {
+                    if (shortNameToRouteId.containsKey(name)) {
+                        System.out.println("⚠️  Short name collision: \"" + name + "\" used by both "
+                                + shortNameToRouteId.get(name) + " and " + id + ". Keeping first.");
+                    } else {
+                        shortNameToRouteId.put(name, id);
+                    }
+                }
             }
         }
     }
@@ -184,14 +205,12 @@ public class TransitService {
      * Parses shapes.txt and builds shapePolylines.
      *
      * <p>Each shape is stored as an ordered list of [lat, lon, cumulativeDistKm] triples.
-     * For rapid-bus-mrtfeeder, shape_dist_traveled is read directly from the file.
-     * For rapid-bus-kl (where it is absent), cumulative distance is computed by summing
-     * Haversine distances between consecutive shape points.
+     * For rapid-bus-mrtfeeder, shape_dist_traveled is read directly. For rapid-bus-kl
+     * (where it is absent), cumulative distance is computed by summing arc-lengths between
+     * consecutive shape points.
      */
     private void loadShapes(String folderPath) throws Exception {
         ClassPathResource resource = new ClassPathResource(folderPath + "/shapes.txt");
-
-        // Temporary map: shape_id → unsorted list of [sequence, lat, lon, distKm]
         Map<String, List<double[]>> rawPoints = new HashMap<>();
 
         try (CSVReader reader = new CSVReader(new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8))) {
@@ -211,7 +230,6 @@ public class TransitService {
             }
         }
 
-        // Sort by sequence and compute arc-length where shape_dist_traveled is absent.
         for (Map.Entry<String, List<double[]>> entry : rawPoints.entrySet()) {
             List<double[]> points = entry.getValue();
             points.sort(Comparator.comparingDouble(p -> p[0]));
@@ -224,17 +242,13 @@ public class TransitService {
                 double lat = p[1], lon = p[2];
 
                 if (p[3] >= 0) {
-                    // shape_dist_traveled available — use it directly (already in km).
                     cumDist = p[3];
                 } else if (i > 0) {
-                    // Compute arc-length from the previous point.
                     double[] prev = polyline.get(i - 1);
                     cumDist += haversineDistanceKm(prev[0], prev[1], lat, lon);
                 }
-
                 polyline.add(new double[]{lat, lon, cumDist});
             }
-
             shapePolylines.put(entry.getKey(), polyline);
         }
     }
@@ -244,7 +258,7 @@ public class TransitService {
      * records the shape_id per route-direction, populates route headsigns,
      * and initialises routePaths entries.
      *
-     * <p>Returns tripId → [routeId, directionId, shapeId] for use by buildGraphsAndPaths.
+     * <p>Returns tripId → [routeId, directionId, shapeId].
      */
     private Map<String, String[]> loadRepresentativeTrips(String folderPath) throws Exception {
         Map<String, String[]> tripToRouteDirection = new HashMap<>();
@@ -268,7 +282,6 @@ public class TransitService {
                     routePaths.putIfAbsent(pathKey, new LinkedList<>());
                     routeDirectionToShapeId.put(pathKey, shapeId);
 
-                    // Populate headsign on the Route object for this direction.
                     Route route = routeDirectory.get(routeId);
                     if (route != null && !headsign.isEmpty()) {
                         if ("0".equals(directionId)) route.setHeadsignOutbound(headsign);
@@ -283,16 +296,11 @@ public class TransitService {
     /**
      * Parses stop_times.txt to build route path LinkedLists, the adjacency graph,
      * and — where available — stop cumulative distances from shape_dist_traveled.
-     *
-     * <p>For feeds that provide shape_dist_traveled in stop_times.txt (rapid-bus-mrtfeeder),
-     * stop distances are read directly. For those that don't (rapid-bus-kl), distances are
-     * computed in {@link #computeStopDistancesFromShapes} after this method returns.
      */
     private void buildGraphsAndPaths(String folderPath) throws Exception {
         Map<String, String[]> targetTrips = loadRepresentativeTrips(folderPath);
         ClassPathResource resource = new ClassPathResource(folderPath + "/stop_times.txt");
 
-        // Temporary map accumulating stop distances per path key when shape_dist_traveled is available.
         Map<String, List<Double>> distanceAccumulator = new HashMap<>();
 
         try (CSVReader reader = new CSVReader(new InputStreamReader(resource.getInputStream(), StandardCharsets.UTF_8))) {
@@ -309,7 +317,6 @@ public class TransitService {
 
                 if (!targetTrips.containsKey(tripId)) continue;
 
-                // Reset boundary tracking when entering a new trip.
                 if (!tripId.equals(currentTripId)) {
                     previousStopId = null;
                     currentTripId = tripId;
@@ -337,31 +344,20 @@ public class TransitService {
             }
         }
 
-        // Commit directly-read distances (MRT feeder feeds).
         stopCumulativeDistances.putAll(distanceAccumulator);
 
-        // For feeds without shape_dist_traveled (rapid-bus-kl), project stops onto the shape polyline.
         for (Map.Entry<String, String[]> entry : targetTrips.entrySet()) {
             String[] routeDirection = entry.getValue();
             String pathKey = routeDirection[0] + "_" + routeDirection[1];
-
             if (!stopCumulativeDistances.containsKey(pathKey)) {
-                String shapeId = routeDirection[2];
-                computeStopDistancesFromShapes(pathKey, shapeId);
+                computeStopDistancesFromShapes(pathKey, routeDirection[2]);
             }
         }
     }
 
     /**
-     * Projects each stop in a route-direction's path onto the shape polyline and records
-     * its cumulative road distance from the route start.
-     *
-     * <p>For each stop, we find the shape point with the minimum Haversine distance to the
-     * stop's GPS coordinates and use that point's cumulative distance as the stop's position
-     * on the route. This is O(stops × shape_points) per route-direction and runs once at startup.
-     *
-     * <p>If the shape polyline is unavailable, the stop list is stored with evenly-spaced
-     * placeholder distances so hasPassed() degrades to index comparison rather than failing.
+     * Projects each stop onto the shape polyline and records its cumulative road distance.
+     * Falls back to index-based placeholders if the shape is unavailable.
      */
     private void computeStopDistancesFromShapes(String pathKey, String shapeId) {
         LinkedList<String> path = routePaths.get(pathKey);
@@ -371,7 +367,6 @@ public class TransitService {
         List<Double> distances = new ArrayList<>(path.size());
 
         if (polyline == null || polyline.isEmpty()) {
-            // No shape available — assign index-based placeholders.
             for (int i = 0; i < path.size(); i++) distances.add((double) i);
             stopCumulativeDistances.put(pathKey, distances);
             return;
@@ -383,8 +378,6 @@ public class TransitService {
                 distances.add(distances.isEmpty() ? 0.0 : distances.get(distances.size() - 1));
                 continue;
             }
-
-            // Find the closest shape point to this stop.
             double minDist = Double.MAX_VALUE;
             double closestCumDist = 0.0;
             for (double[] point : polyline) {
@@ -394,7 +387,6 @@ public class TransitService {
                     closestCumDist = point[2];
                 }
             }
-
             distances.add(closestCumDist);
         }
 
@@ -436,7 +428,6 @@ public class TransitService {
     // Geometry helpers
     // -------------------------------------------------------------------------
 
-    /** Haversine distance in kilometers. */
     private double haversineDistanceKm(double lat1, double lon1, double lat2, double lon2) {
         final double R = 6371.0;
         double dLat = Math.toRadians(lat2 - lat1);
@@ -455,7 +446,24 @@ public class TransitService {
     public Route getRouteById(String id) { return routeDirectory.get(id); }
 
     /**
+     * Resolves a public route short name to the internal GTFS route_id used as the
+     * key in routePaths and stopCumulativeDistances.
+     *
+     * <p>e.g. "T815" → "30000016", "T789" → "T7890".
+     *
+     * @param shortName The route short name as displayed on buses and broadcast by Prasarana.
+     * @return The internal route_id, or the original shortName unchanged if no mapping exists
+     *         (allowing the caller to fall back to treating the input as a direct key).
+     */
+    public String resolveRouteIdByShortName(String shortName) {
+        return shortNameToRouteId.getOrDefault(shortName, shortName);
+    }
+
+    /**
      * Returns the ordered stop ID sequence for a route and direction.
+     * {@code routeId} must be the internal GTFS route_id — use
+     * {@link #resolveRouteIdByShortName(String)} to convert a short name first.
+     *
      * @param directionId 0 = outbound, 1 = inbound.
      */
     public LinkedList<String> getRoutePath(String routeId, int directionId) {
@@ -464,7 +472,7 @@ public class TransitService {
 
     /**
      * Returns the outbound (direction 0) stop sequence for a route.
-     * Used by GET /routes/{routeId}/path for map polyline rendering.
+     * Used by GET /routes/{shortName}/path for map polyline rendering.
      */
     public LinkedList<String> getRoutePath(String routeId) {
         return routePaths.get(routeId + "_0");
@@ -473,10 +481,7 @@ public class TransitService {
     /**
      * Returns the pre-computed cumulative road distances (km) from route start to each stop,
      * indexed parallel to the list returned by {@link #getRoutePath(String, int)}.
-     *
-     * @param routeId     Route ID as stored in routes.txt.
-     * @param directionId 0 = outbound, 1 = inbound.
-     * @return List of cumulative distances, or null if not available for this route/direction.
+     * {@code routeId} must be the internal GTFS route_id.
      */
     public List<Double> getStopCumulativeDistances(String routeId, int directionId) {
         return stopCumulativeDistances.get(routeId + "_" + directionId);
