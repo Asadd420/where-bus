@@ -15,6 +15,12 @@ public class Route {
     @Schema(description = "Full terminal-to-terminal route description.", example = "Stesen LRT Universiti ~ Universiti Malaya via Pantai Hillpark")
     private String longName;
 
+    @Schema(description = "Destination display text for outbound direction (direction_id = 0).", example = "UNIVERSITI MALAYA")
+    private String headsignOutbound;
+
+    @Schema(description = "Destination display text for inbound direction (direction_id = 1).", example = "STESEN LRT UNIVERSITI")
+    private String headsignInbound;
+
     public Route(String id, String name, String longName) {
         this.id = id;
         this.name = name;
@@ -29,4 +35,10 @@ public class Route {
 
     public String getLongName() { return longName; }
     public void setLongName(String longName) { this.longName = longName; }
+
+    public String getHeadsignOutbound() { return headsignOutbound; }
+    public void setHeadsignOutbound(String headsignOutbound) { this.headsignOutbound = headsignOutbound; }
+
+    public String getHeadsignInbound() { return headsignInbound; }
+    public void setHeadsignInbound(String headsignInbound) { this.headsignInbound = headsignInbound; }
 }
