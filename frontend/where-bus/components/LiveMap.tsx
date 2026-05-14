@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, useMap } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polyline, CircleMarker, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import { LocateFixed } from 'lucide-react';
 import 'leaflet/dist/leaflet.css';
@@ -130,11 +130,11 @@ function RecenterControl({ targetPosition }: { targetPosition: [number, number] 
 interface LiveMapProps {
   selectedStop: Stop | null;
   selectedRoute: Route | null;
+  routeStops: Stop[];
   onStopClick: (stop: Stop) => void;
 }
 
-export default function LiveMap({ selectedStop, selectedRoute, onStopClick }: LiveMapProps) {
-  const [routeStops, setRouteStops] = useState<Stop[]>([]);
+export default function LiveMap({ selectedStop, selectedRoute, routeStops, onStopClick }: LiveMapProps) {
   const [userLocation, setUserLocation] = useState<[number, number]>(FSKTM_POSITION);
   const [hasUserLocation, setHasUserLocation] = useState(false);
 
@@ -153,20 +153,6 @@ export default function LiveMap({ selectedStop, selectedRoute, onStopClick }: Li
       );
     }
   }, []);
-
-  // Fetch the physical polyline path when a route is selected
-  useEffect(() => {
-    if (selectedRoute) {
-      fetch(`/api/transit/routes/${selectedRoute.id}/path`)
-        .then(res => res.json())
-        .then((data: Stop[]) => {
-          setRouteStops(data);
-        })
-        .catch(err => console.error("Failed to fetch route path", err));
-    } else {
-      setRouteStops([]); 
-    }
-  }, [selectedRoute]);
 
   const polylineCoords: [number, number][] = routeStops.map(stop => [stop.latitude, stop.longitude]);
 
@@ -207,14 +193,14 @@ export default function LiveMap({ selectedStop, selectedRoute, onStopClick }: Li
             radius={5}
             pathOptions={{ color: 'white', fillColor: '#374151', fillOpacity: 1, weight: 2 }}
             eventHandlers={{ click: () => onStopClick(stop) }}
-          >
-            <Popup>{stop.name}</Popup>
-          </CircleMarker>
+          />
         ))}
 
         {selectedStop && (
           <Marker position={[selectedStop.latitude, selectedStop.longitude]} icon={MinimalGrayIcon}>
-            <Popup>{selectedStop.name}</Popup>
+            <Tooltip permanent direction="top" offset={[0, -10]}>
+              {selectedStop.name}
+            </Tooltip>
           </Marker>
         )}
 

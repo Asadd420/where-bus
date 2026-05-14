@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import dynamic from "next/dynamic";
 import SearchBar from "@/components/SearchBar";
 import BottomSheet from "@/components/BottomSheet";
@@ -45,6 +45,23 @@ export default function Home() {
   // Selection State
   const [selectedStop, setSelectedStop] = useState<Stop | null>(null);
   const [selectedRoute, setSelectedRoute] = useState<Route | null>(null);
+  const [routeStops, setRouteStops] = useState<Stop[]>([]);
+
+  // Fetch the route's stop list whenever the selected route changes.
+  // We only call setRouteStops inside the async callback (never synchronously
+  // in the effect body) to satisfy the react-hooks/set-state-in-effect rule.
+  // Clearing routeStops is handled in the event handlers below.
+  useEffect(() => {
+    if (!selectedRoute) return;
+
+    let cancelled = false;
+    fetch(`/api/transit/routes/${encodeURIComponent(selectedRoute.name)}/path`)
+      .then((res) => res.json())
+      .then((data: Stop[]) => { if (!cancelled) setRouteStops(data); })
+      .catch((err) => console.error("Failed to fetch route path", err));
+
+    return () => { cancelled = true; };
+  }, [selectedRoute]);
 
   // The Fetch Function connecting to Spring Boot
   const handleSearch = async (query: string) => {
@@ -91,6 +108,7 @@ export default function Home() {
         <LiveMap
           selectedRoute={selectedRoute}
           selectedStop={selectedStop}
+          routeStops={routeStops}
           onStopClick={handleSelectStopOnRoute}
         />
       </div>
@@ -124,11 +142,13 @@ export default function Home() {
             onSelectStop={(stop) => {
               setSelectedStop(stop);
               setSelectedRoute(null);
+              setRouteStops([]);
               setUiState("STOP_SELECTED");
             }}
             onSelectRoute={(route) => {
               setSelectedRoute(route);
               setSelectedStop(null);
+              setRouteStops([]); // clear stale stops immediately; effect will repopulate
               setUiState("ROUTE_SELECTED");
             }}
           />
@@ -151,9 +171,12 @@ export default function Home() {
           setUiState("STANDBY");
           setSelectedStop(null);
           setSelectedRoute(null);
+          setRouteStops([]);
         }}
         selectedStop={selectedStop}
         selectedRoute={selectedRoute}
+        routeStops={routeStops}
+        onSelectStop={handleSelectStopOnRoute}
       />
     </main>
   );

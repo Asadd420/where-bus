@@ -11,17 +11,22 @@ interface BottomSheetProps {
   onClose: () => void;
   selectedStop: Stop | null;
   selectedRoute: Route | null;
+  routeStops: Stop[];
+  onSelectStop: (stop: Stop) => void;
 }
 
-// Custom hook to detect screen size for Framer Motion animations
+// Custom hook to detect screen size for Framer Motion animations.
+// Lazy initialiser reads the media query once on mount (avoids SSR mismatch)
+// so the effect body only needs to subscribe to future changes — never calls
+// setState synchronously, satisfying react-hooks/set-state-in-effect.
 function useIsDesktop() {
-  const [isDesktop, setIsDesktop] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.matchMedia('(min-width: 768px)').matches;
+  });
 
   useEffect(() => {
-    // 768px matches Tailwind's 'md:' breakpoint
     const mediaQuery = window.matchMedia('(min-width: 768px)');
-    setIsDesktop(mediaQuery.matches);
-
     const handler = (e: MediaQueryListEvent) => setIsDesktop(e.matches);
     mediaQuery.addEventListener('change', handler);
     return () => mediaQuery.removeEventListener('change', handler);
@@ -30,7 +35,7 @@ function useIsDesktop() {
   return isDesktop;
 }
 
-export default function BottomSheet({ isOpen, onClose, selectedStop, selectedRoute }: BottomSheetProps) {
+export default function BottomSheet({ isOpen, onClose, selectedStop, selectedRoute, routeStops, onSelectStop }: BottomSheetProps) {
   const isDesktop = useIsDesktop();
 
   return (
@@ -68,8 +73,8 @@ export default function BottomSheet({ isOpen, onClose, selectedStop, selectedRou
           {/* Scrollable Content inside the sheet */}
           <div className="px-6 pb-8 pt-2 overflow-y-auto flex-1 md:pt-8">
             
-            {/* Both route AND stop selected: show live ETAs */}
-            {selectedRoute && selectedStop ? (
+            {/* Branch 1: Route is selected — show full stop list with inline ETAs */}
+            {selectedRoute ? (
               <>
                 <h2 className="text-xl font-bold text-gray-900 mb-1 flex items-center">
                   <RouteIcon size={20} className="mr-2 text-blue-500" />
@@ -77,31 +82,52 @@ export default function BottomSheet({ isOpen, onClose, selectedStop, selectedRou
                 </h2>
                 <p className="text-sm text-gray-500 mb-4 ml-7">{selectedRoute.longName}</p>
 
-                <div className="flex items-center mb-4">
-                  <MapPin size={16} className="mr-2 text-gray-500 shrink-0" />
-                  <p className="text-sm font-medium text-gray-800">{selectedStop.name}</p>
-                </div>
+                {routeStops.length === 0 ? (
+                  /* Loading state */
+                  <div className="flex items-center justify-center py-10 text-gray-400">
+                    <div className="w-5 h-5 border-2 border-gray-300 border-t-transparent rounded-full animate-spin mr-2" />
+                    <span className="text-sm">Loading stops…</span>
+                  </div>
+                ) : (
+                  <div className="space-y-1">
+                    {/* Deduplicate by stop.id — loop routes can visit the same
+                        physical stop twice; first occurrence wins to preserve order. */}
+                    {routeStops
+                      .filter((stop, index, arr) => arr.findIndex(s => s.id === stop.id) === index)
+                      .map((stop) => {
+                      const isSelected = selectedStop?.id === stop.id;
+                      return (
+                        <div key={stop.id}>
+                          {/* Stop row */}
+                          <button
+                            onClick={() => onSelectStop(stop)}
+                            className={`w-full text-left rounded-2xl px-3 py-2.5 transition-all duration-150 border ${
+                              isSelected
+                                ? 'bg-blue-50 border-blue-200 border-l-4 border-l-blue-500'
+                                : 'bg-gray-50 border-gray-100 hover:bg-gray-100'
+                            }`}
+                          >
+                            <p className={`text-sm leading-snug ${isSelected ? 'font-semibold text-blue-900' : 'font-medium text-gray-800'}`}>
+                              {stop.name}
+                            </p>
+                            <p className="text-xs text-gray-400 mt-0.5">Stop ID: {stop.id}</p>
+                          </button>
 
-                <EtaList routeId={selectedRoute.name} stopId={selectedStop.id} />
-              </>
-
-            ) : selectedRoute ? (
-              /* Only route selected — prompt the user to tap a stop */
-              <>
-                <h2 className="text-xl font-bold text-gray-900 mb-1 flex items-center">
-                  <RouteIcon size={20} className="mr-2 text-blue-500" />
-                  {selectedRoute.name}
-                </h2>
-                <p className="text-sm text-gray-500 mb-5 ml-7">{selectedRoute.longName}</p>
-
-                <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl text-blue-700 text-sm flex items-center leading-relaxed">
-                  <MapPin size={20} className="mr-3 shrink-0" />
-                  The map is now displaying this route's path. Select a specific stop on the map to view arriving buses.
-                </div>
+                          {/* Inline ETA list — only for the selected stop */}
+                          {isSelected && (
+                            <div className="mt-2 mb-1 px-1">
+                              <EtaList routeId={selectedRoute.name} stopId={stop.id} />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </>
 
             ) : selectedStop ? (
-              /* Stop selected from search with no route — ETAs require a routeId */
+              /* Branch 2: Stop selected from search with no route */
               <>
                 <h2 className="text-xl font-bold text-gray-900 mb-1 flex items-center">
                   <MapPin size={20} className="mr-2 text-gray-500" />
