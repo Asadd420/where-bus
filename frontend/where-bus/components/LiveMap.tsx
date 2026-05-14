@@ -130,9 +130,10 @@ function RecenterControl({ targetPosition }: { targetPosition: [number, number] 
 interface LiveMapProps {
   selectedStop: Stop | null;
   selectedRoute: Route | null;
+  onStopClick: (stop: Stop) => void;
 }
 
-export default function LiveMap({ selectedStop, selectedRoute }: LiveMapProps) {
+export default function LiveMap({ selectedStop, selectedRoute, onStopClick }: LiveMapProps) {
   const [routeStops, setRouteStops] = useState<Stop[]>([]);
   const [userLocation, setUserLocation] = useState<[number, number]>(FSKTM_POSITION);
   const [hasUserLocation, setHasUserLocation] = useState(false);
@@ -200,11 +201,12 @@ export default function LiveMap({ selectedStop, selectedRoute }: LiveMapProps) {
         )}
 
         {routeStops.map((stop, index) => (
-          <CircleMarker 
-            key={`${stop.id}-${index}`} 
-            center={[stop.latitude, stop.longitude]} 
+          <CircleMarker
+            key={`${stop.id}-${index}`}
+            center={[stop.latitude, stop.longitude]}
             radius={5}
             pathOptions={{ color: 'white', fillColor: '#374151', fillOpacity: 1, weight: 2 }}
+            eventHandlers={{ click: () => onStopClick(stop) }}
           >
             <Popup>{stop.name}</Popup>
           </CircleMarker>

@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Bus, MapPin, Route as RouteIcon } from 'lucide-react';
 import { Stop, Route } from '@/app/page';
+import EtaList from '@/components/EtaList';
 
 interface BottomSheetProps {
   isOpen: boolean;
@@ -67,38 +68,54 @@ export default function BottomSheet({ isOpen, onClose, selectedStop, selectedRou
           {/* Scrollable Content inside the sheet */}
           <div className="px-6 pb-8 pt-2 overflow-y-auto flex-1 md:pt-8">
             
-            {/* View for when a STOP is selected */}
-            {selectedStop && (
+            {/* Both route AND stop selected: show live ETAs */}
+            {selectedRoute && selectedStop ? (
               <>
                 <h2 className="text-xl font-bold text-gray-900 mb-1 flex items-center">
-                  <MapPin size={20} className="mr-2 text-gray-500" />
-                  {selectedStop.name}
+                  <RouteIcon size={20} className="mr-2 text-blue-500" />
+                  {selectedRoute.name}
                 </h2>
-                <p className="text-sm text-gray-500 mb-5 ml-7">Stop ID: {selectedStop.id}</p>
-                
-                {/* Phase 6 Placeholder */}
-                <div className="p-4 bg-gray-50 border border-gray-200 rounded-2xl flex flex-col items-center justify-center text-gray-400 py-8">
-                  <Bus size={24} className="mb-2 opacity-50" />
-                  <p className="text-sm text-center">Real-time ETAs will appear here once live tracking is connected.</p>
-                </div>
-              </>
-            )}
+                <p className="text-sm text-gray-500 mb-4 ml-7">{selectedRoute.longName}</p>
 
-            {/* View for when a ROUTE is selected */}
-            {selectedRoute && (
+                <div className="flex items-center mb-4">
+                  <MapPin size={16} className="mr-2 text-gray-500 shrink-0" />
+                  <p className="text-sm font-medium text-gray-800">{selectedStop.name}</p>
+                </div>
+
+                <EtaList routeId={selectedRoute.name} stopId={selectedStop.id} />
+              </>
+
+            ) : selectedRoute ? (
+              /* Only route selected — prompt the user to tap a stop */
               <>
                 <h2 className="text-xl font-bold text-gray-900 mb-1 flex items-center">
                   <RouteIcon size={20} className="mr-2 text-blue-500" />
                   {selectedRoute.name}
                 </h2>
                 <p className="text-sm text-gray-500 mb-5 ml-7">{selectedRoute.longName}</p>
-                
+
                 <div className="p-4 bg-blue-50 border border-blue-100 rounded-2xl text-blue-700 text-sm flex items-center leading-relaxed">
                   <MapPin size={20} className="mr-3 shrink-0" />
                   The map is now displaying this route's path. Select a specific stop on the map to view arriving buses.
                 </div>
               </>
-            )}
+
+            ) : selectedStop ? (
+              /* Stop selected from search with no route — ETAs require a routeId */
+              <>
+                <h2 className="text-xl font-bold text-gray-900 mb-1 flex items-center">
+                  <MapPin size={20} className="mr-2 text-gray-500" />
+                  {selectedStop.name}
+                </h2>
+                <p className="text-sm text-gray-500 mb-5 ml-7">Stop ID: {selectedStop.id}</p>
+
+                <div className="p-4 bg-gray-50 border border-gray-200 rounded-2xl flex flex-col items-center justify-center text-gray-400 py-8">
+                  <Bus size={24} className="mb-2 opacity-50" />
+                  <p className="text-sm text-center">Search for a route, then tap this stop on the map to see live ETAs.</p>
+                </div>
+              </>
+
+            ) : null}
 
           </div>
         </motion.div>

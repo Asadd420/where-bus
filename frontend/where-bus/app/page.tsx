@@ -69,14 +69,21 @@ export default function Home() {
     setUiState('STANDBY');
   };
 
+  // Selecting a stop on the route path: keep the route selected, just update the stop
+  const handleSelectStopOnRoute = (stop: Stop) => {
+    setSelectedStop(stop);
+    // deliberately do NOT clear selectedRoute or change uiState
+  };
+
   return (
     <main className="relative h-[100dvh] w-screen overflow-hidden bg-gray-50 font-sans">
       
       {/* Background Map */}
       <div className="absolute inset-0 z-0">
-        <LiveMap 
-          selectedRoute={selectedRoute} 
-          selectedStop={selectedStop} 
+        <LiveMap
+          selectedRoute={selectedRoute}
+          selectedStop={selectedStop}
+          onStopClick={handleSelectStopOnRoute}
         />
       </div>
 
