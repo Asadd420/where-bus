@@ -145,7 +145,22 @@ export default function BottomSheet({ isOpen, onClose, onHide, selectedStop, sel
             {selectedRoute ? (
               <>
                 <h2 className="text-xl font-bold text-gray-900 mb-1 flex items-center">
-                  <RouteIcon size={20} className="mr-2 text-blue-500" />
+                  {(() => {
+                    const isMRT = selectedRoute.category
+                      ? selectedRoute.category === 'rapid-bus-mrtfeeder'
+                      : /^\d+$/.test(selectedRoute.id);
+                    const iconColor = isMRT ? undefined : '#880808';
+                    const iconLabel = isMRT ? 'MRT Feeder route' : 'RapidKL Bus route';
+                    return (
+                      <span
+                        className="bg-gray-100 p-1.5 rounded-full mr-2 shrink-0 text-gray-600 inline-flex items-center justify-center"
+                        title={iconLabel}
+                        aria-label={iconLabel}
+                      >
+                        <RouteIcon size={18} color={iconColor} />
+                      </span>
+                    );
+                  })()}
                   {selectedRoute.name}
                 </h2>
                 <p className="text-sm text-gray-500 mb-4 ml-7">{selectedRoute.longName}</p>
