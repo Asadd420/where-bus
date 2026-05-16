@@ -170,11 +170,11 @@ export default function BottomSheet({ isOpen, onClose, onHide, selectedStop, sel
                             onClick={() => onSelectStop(stop)}
                             className={`w-full text-left rounded-2xl px-3 py-2.5 transition-all duration-150 border ${
                               isSelected
-                                ? 'bg-red-50 border-red-200 border-l-4 border-l-red-600'
+                                ? 'bg-gray-100 border-gray-300 border-l-4 border-l-gray-600'
                                 : 'bg-gray-50 border-gray-100 hover:bg-gray-100'
                             }`}
                           >
-                            <p className={`text-sm leading-snug ${isSelected ? 'font-semibold text-red-900' : 'font-medium text-gray-800'}`}>
+                            <p className={`text-sm leading-snug ${isSelected ? 'font-semibold text-gray-900' : 'font-medium text-gray-800'}`}>
                               {stop.name}
                             </p>
                             <p className="text-xs text-gray-400 mt-0.5">Stop ID: {stop.id}</p>
