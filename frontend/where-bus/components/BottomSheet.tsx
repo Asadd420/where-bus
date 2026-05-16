@@ -16,7 +16,6 @@ interface StopRoute {
 
 interface BottomSheetProps {
   isOpen: boolean;
-  onClose: () => void;
   onHide?: () => void;
   selectedStop: Stop | null;
   selectedRoute: Route | null;
@@ -44,7 +43,7 @@ function useIsDesktop() {
   return isDesktop;
 }
 
-export default function BottomSheet({ isOpen, onClose, onHide, selectedStop, selectedRoute, routeStops, onSelectStop }: BottomSheetProps) {
+export default function BottomSheet({ isOpen, onHide, selectedStop, selectedRoute, routeStops, onSelectStop }: BottomSheetProps) {
   const isDesktop = useIsDesktop();
 
   // Ref attached to whichever stop row is currently selected.
@@ -113,7 +112,7 @@ export default function BottomSheet({ isOpen, onClose, onHide, selectedStop, sel
           dragElastic={0.05}
           onDragEnd={(e, info) => {
             if (!isDesktop && info.offset.y > 100) {
-              onClose();
+              onHide?.();
             }
           }}
           

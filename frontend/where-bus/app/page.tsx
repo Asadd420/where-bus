@@ -197,12 +197,6 @@ export default function Home() {
       {/* Bottom Foreground: Draggable Data Sheet */}
       <BottomSheet
         isOpen={(uiState === "STOP_SELECTED" || uiState === "ROUTE_SELECTED") && isSheetOpen}
-        onClose={() => {
-          setUiState("STANDBY");
-          setSelectedStop(null);
-          setSelectedRoute(null);
-          setRouteStops([]);
-        }}
         onHide={handleHideSheet}
         selectedStop={selectedStop}
         selectedRoute={selectedRoute}
