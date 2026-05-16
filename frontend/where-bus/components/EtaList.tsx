@@ -23,26 +23,30 @@ export default function EtaList({ routeId, stopId }: EtaListProps) {
   const [error, setError] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
+    let currentController: AbortController | null = null;
 
     const fetchEta = async () => {
+      const controller = new AbortController();
+      currentController = controller;
       try {
-        const res = await fetch(`/api/transit/eta?routeId=${encodeURIComponent(routeId)}&stopId=${encodeURIComponent(stopId)}`);
+        const res = await fetch(
+          `/api/transit/eta?routeId=${encodeURIComponent(routeId)}&stopId=${encodeURIComponent(stopId)}`,
+          { signal: controller.signal },
+        );
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data: EtaEntry[] = await res.json();
-        if (!cancelled) {
-          setEntries(data);
-          setError(false);
-        }
-      } catch {
-        if (!cancelled) setError(true);
+        setEntries(data);
+        setError(false);
+      } catch (err) {
+        if (err instanceof Error && err.name === 'AbortError') return;
+        setError(true);
       }
     };
 
     fetchEta();
     const interval = setInterval(fetchEta, 30_000);
     return () => {
-      cancelled = true;
+      currentController?.abort();
       clearInterval(interval);
     };
   }, [routeId, stopId]);
