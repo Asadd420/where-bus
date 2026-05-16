@@ -51,35 +51,45 @@ export default function SearchResultsPanel({
             <p className="text-xs font-bold text-gray-400 uppercase tracking-wider ml-2">
               Routes
             </p>
-            {routeResults.map((route) => (
-              <div
-                key={route.id}
-                onClick={() => onSelectRoute(route)}
-                className="
-                flex items-center p-4
-                bg-white/80
-                rounded-2xl
-                border border-white/40
-                shadow-sm
-                cursor-pointer
-                transition-all duration-200
-                hover:bg-white
-                hover:shadow-xl
-                hover:scale-[1.01]
-                active:scale-[0.99]"
-
-              >
-                <div className="bg-blue-50 p-3 rounded-full mr-4 text-blue-600">
-                  <Bus size={20} />
+            {routeResults.map((route) => {
+              const isMRTFeeder = route.category
+                ? route.category === 'rapid-bus-mrtfeeder'
+                : /^\d+$/.test(route.id);
+              const iconColor   = isMRTFeeder ? undefined : '#880808';
+              const iconLabel   = isMRTFeeder ? 'MRT Feeder route' : 'RapidKL Bus route';
+              return (
+                <div
+                  key={route.id}
+                  onClick={() => onSelectRoute(route)}
+                  className="
+                  flex items-center p-4
+                  bg-white/80
+                  rounded-2xl
+                  border border-white/40
+                  shadow-sm
+                  cursor-pointer
+                  transition-all duration-200
+                  hover:bg-white
+                  hover:shadow-xl
+                  hover:scale-[1.01]
+                  active:scale-[0.99]"
+                >
+                  <div
+                    className="bg-gray-100 p-3 rounded-full mr-4 text-gray-600"
+                    title={iconLabel}
+                    aria-label={iconLabel}
+                  >
+                    <Bus size={20} color={iconColor} />
+                  </div>
+                  <div className="flex-1">
+                    <h3 className="font-bold text-gray-900">{route.name}</h3>
+                    <p className="text-xs text-gray-500 line-clamp-1">
+                      {isMRTFeeder ? 'MRT Feeder' : 'RapidKL Bus'} · {route.longName}
+                    </p>
+                  </div>
                 </div>
-                <div className="flex-1">
-                  <h3 className="font-bold text-gray-900">{route.name}</h3>
-                  <p className="text-xs text-gray-500 line-clamp-1">
-                    {route.longName}
-                  </p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 

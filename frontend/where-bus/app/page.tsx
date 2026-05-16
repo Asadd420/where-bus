@@ -18,6 +18,7 @@ export interface Route {
   id: string;
   name: string;
   longName: string;
+  category?: string; // "rapid-bus-kl" | "rapid-bus-mrtfeeder"
 }
 
 const LiveMap = dynamic(() => import("@/components/LiveMap"), {

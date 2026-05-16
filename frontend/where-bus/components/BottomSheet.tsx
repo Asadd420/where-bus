@@ -11,6 +11,7 @@ interface StopRoute {
   longName: string;
   servesOutbound: boolean;
   servesInbound: boolean;
+  category?: string; // "rapid-bus-kl" | "rapid-bus-mrtfeeder"
 }
 
 interface BottomSheetProps {
@@ -218,15 +219,29 @@ export default function BottomSheet({ isOpen, onClose, onHide, selectedStop, sel
                   </div>
                 ) : (
                   <div className="space-y-3">
-                    {stopRoutes.map((route) => (
+                    {stopRoutes.map((route) => {
+                      const isMRTFeeder = route.category
+                        ? route.category === 'rapid-bus-mrtfeeder'
+                        : route.shortName === route.longName;
+                      const iconColor   = isMRTFeeder ? undefined : '#880808';
+                      const iconLabel   = isMRTFeeder ? 'MRT Feeder route' : 'RapidKL Bus route';
+                      return (
                       <div key={route.shortName} className="rounded-2xl border border-gray-100 overflow-hidden">
                         {/* Route header */}
                         <div className="flex items-center px-3 py-2.5 bg-gray-50 border-b border-gray-100">
-                          <RouteIcon size={16} className="mr-2 text-blue-500 shrink-0" />
+                          <span
+                            className="mr-2 shrink-0 text-gray-600"
+                            title={iconLabel}
+                            aria-label={iconLabel}
+                          >
+                            <RouteIcon size={16} color={iconColor} />
+                          </span>
                           <div className="flex-1 min-w-0">
                             <span className="font-semibold text-gray-900 text-sm">{route.shortName}</span>
                             {route.longName && (
-                              <span className="text-xs text-gray-500 ml-2 truncate block">{route.longName}</span>
+                              <span className="text-xs text-gray-500 ml-2 truncate block">
+                                {isMRTFeeder ? 'MRT Feeder' : 'RapidKL Bus'} · {route.longName}
+                              </span>
                             )}
                           </div>
                           <div className="flex gap-1 ml-2 shrink-0">
@@ -243,7 +258,8 @@ export default function BottomSheet({ isOpen, onClose, onHide, selectedStop, sel
                           <EtaList routeId={route.shortName} stopId={selectedStop.id} />
                         </div>
                       </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </>
