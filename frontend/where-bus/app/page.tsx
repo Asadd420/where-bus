@@ -192,6 +192,7 @@ export default function Home() {
               setRouteStopsError(false);
               setUiState("STOP_SELECTED");
               setIsSheetOpen(true);
+              setSearchQuery("");
             }}
             onSelectRoute={(route) => {
               setSelectedRoute(route);
@@ -201,6 +202,7 @@ export default function Home() {
               setRouteSelectionKey(k => k + 1);
               setUiState("ROUTE_SELECTED");
               setIsSheetOpen(true);
+              setSearchQuery("");
             }}
           />
         </div>
@@ -211,7 +213,10 @@ export default function Home() {
         uiState={uiState}
         query={searchQuery}
         onQueryChange={handleSearch}
-        onSearchFocus={() => setUiState("SEARCHING")}
+        onSearchFocus={() => {
+        setUiState("SEARCHING");
+        setStopResults([]);
+        setRouteResults([]); }}
         onCancel={clearSearch}
       />
 
